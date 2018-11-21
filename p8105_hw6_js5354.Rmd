@@ -1,0 +1,102 @@
+---
+title: "HW6"
+author: "Jiayi Shen"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      dpi = 300)
+library(tidyverse)
+library(rvest)
+
+```
+
+
+#Problem 1 
+```{r load homicide data, message = FALSE}
+homicide_data = read_csv("./data/homicide-data.csv")
+```
+
+```{r homicide data tidying part 1}
+#Create a city_state variable
+homicide_data =
+homicide_data %>% 
+  mutate(city_state = str_c(city, ",", state)) %>% 
+  select(-city, -state)
+
+# create a binary variable indicating whether the homicide is solved. 
+homicide_data =
+homicide_data %>% 
+  filter(!city_state %in% c("Dallas,TX", "Phoenix,AZ", "Kansas City,MO", "Tulsa,AL")) %>% 
+  mutate(solved =as.numeric(disposition == "Closed by arrest"))
+  
+```
+
+
+```{r homicide data tidying part 2}
+# modifiy victim_race to have categories white and non-white 
+# with white as the reference category
+homicide_data = 
+  homicide_data %>% 
+  mutate(victim_race = as_factor(ifelse(victim_race == "White", "white","non-white"))) %>% 
+  mutate(victim_race = fct_relevel(victim_race, "white")) %>% 
+  mutate(victim_age = as.numeric(victim_age)) 
+```
+
+
+```{r logistic regression to homicide data, message = FALSE}
+# fit a logistic regression with "resolved" as the outcome and victim age, sex and race as predictors
+fit_logistic = 
+  homicide_data %>% 
+  filter(city_state == "Baltimore,MD") %>% 
+  glm(solved ~ victim_age + victim_sex + victim_race, data = ., family = binomial()) 
+
+
+# obtain the estimate and confidence interval of the adjusted odds ratio
+tibble1 = 
+fit_logistic %>% 
+  broom::tidy() %>% 
+  mutate(OR_estimate = exp(estimate)) %>% 
+  select(term, OR_estimate, p.value)
+
+tibble2 = as_tibble(exp(confint.default(fit_logistic)))
+
+cbind(tibble1, tibble2) %>% knitr::kable(digits = 3)
+```
+
+**Compare non-white victims to white victims while keeping all other variables fixed:**
+According to the result of `glm`, the estimates of adjusted odds ratio for the predictor `victim_race`(non-white compared to white victims) is less than 0.5 with a p-value less than 0.01. Thus we conclude that in Baltimore, homicide cases with non-white victims are significantly less likely to be resolved than those with white victims, given that all other variables are fixed. 
+
+
+```{r glm for each of the cities}
+glm_result = function(df){
+  fit = 
+  df %>% 
+  filter(!victim_sex == "Unknown") %>% 
+  glm(solved ~ victim_age + victim_sex + victim_race, data = ., family = binomial()) 
+
+  t1 = 
+  fit %>% 
+    broom::tidy() %>% 
+    mutate(OR_estimate = exp(estimate)) %>% 
+    select(term, OR_estimate, p.value)
+
+  t2 = as_tibble(exp(confint.default(fit)))
+  
+  return(cbind(t1, t2))
+}
+
+
+# run glm for each of the cities in your dataset
+homicide_data %>% 
+  select(city_state, solved, victim_age, victim_sex, victim_race) %>% 
+  nest(solved:victim_race) %>%
+  mutate(glm = map(data, glm_result)) %>% 
+  select(-data) %>% 
+  unnest() %>% 
+  filter(term == "victim_racenon-white") # obtain coef only for the predictor "race"
+
+
+```
+
