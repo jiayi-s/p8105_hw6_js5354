@@ -145,7 +145,7 @@ bwt %>%
 ```
 
 Firstly we compute a correlation matrix to check whether there is potential interactions between varaibles in this birthweight data. As seen from the output, there is a noticable positive correlation between `bhead` and `blength` so in later model selection we would include an interaction term between these two variables. \n
-All other variables, except `parity` and `smoken`, show moderate correlation with `bwt`--the outcome of interest. In addition, because `pnumlbw` and `pnumsga` is linearly dependent on other variables,  "NA"s were returned. \n
+All other variables, except `parity` and `smoken`, show moderate correlation with `bwt`--the outcome of interest. In addition, because `pnumlbw` and `pnumsga` take the value 0 for the entire dataset,  "NA"s were returned. \n
 Because `ppbmi` is calculated from `mheight` and `ppwt` and `wtgain` refers to the difference between `ppwt` and `delwt`, so we retain only `wtgain` in our initial model. \n
 So we will start our model selection procedure with a linear model that has variables except `babysex`, `bhead`, `blength`, `fincome`, `gaweeks`, `malform`, `menarche`, `momage`, `mrace` and `wtgain` as predictors. Then we will follow backward elimination to remove non-significant variables that have p-value less than 0.05.
 
