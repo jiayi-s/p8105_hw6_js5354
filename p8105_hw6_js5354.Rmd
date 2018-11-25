@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE,
 library(tidyverse)
 library(rvest)
 
+library(modelr)
+library(mgcv)
 ```
 
 
@@ -117,4 +119,103 @@ glm_each_city %>%
 In 14 out of the 47 cities that have valid records in this homicide dataset, cases whose victims are non-white are less likely to be resolved based on the estimated odds ratios from the logistic regression model `solved ~ victim_age + victim_sex + victim_race`. On the other hand, in Las Vegas, Mempis, Fort Worthm, Columbus, Houston, Nashville, Birmingham and Tampa, the lower 95% confidence limits are above 0.5, meaning that in these cities, the likelihood of cases with non-white victims being resolved is significantly larger than those with white victims. 
 
 #Problem 2
+```{r load birthweight data and initial tidying}
+# load birthweight data
+bwt = read_csv("./data/birthweight.csv")
 
+# initial tidying 
+bwt = 
+  bwt %>% 
+  mutate(babysex = babysex -1, # male = 0, female = 1
+        babysex = as.factor(babysex),
+         frace = as.factor(frace),
+         malform = as.factor(malform),
+         mrace = as.factor(mrace))
+
+# check for missing values
+bwt[which(!complete.cases(bwt)),]        
+```
+
+
+```{r correlation matrix}
+# first look at the correlation between variables
+bwt %>% 
+  select(-babysex, -frace, -mrace, -malform) %>% 
+  cor()
+```
+
+Firstly we compute a correlation matrix to check whether there is potential interactions between varaibles in this birthweight data. As seen from the output, there is a noticable positive correlation between `bhead` and `blength` so in later model selection we would include an interaction term between these two variables. \n
+All other variables, except `parity` and `smoken`, show moderate correlation with `bwt`--the outcome of interest. In addition, because `pnumlbw` and `pnumsga` is linearly dependent on other variables,  "NA"s were returned. \n
+Because `ppbmi` is calculated from `mheight` and `ppwt` and `wtgain` refers to the difference between `ppwt` and `delwt`, so we retain only `wtgain` in our initial model. \n
+So we will start our model selection procedure with a linear model that has variables except `babysex`, `bhead`, `blength`, `fincome`, `gaweeks`, `malform`, `menarche`, `momage`, `mrace` and `wtgain` as predictors. Then we will follow backward elimination to remove non-significant variables that have p-value less than 0.05.
+
+
+```{r backward eliminination}
+# initial model
+mult.fit = lm(bwt ~ babysex + bhead + blength + fincome + gaweeks + malform+ menarche + momage+ mrace + wtgain, data = bwt)
+summary(mult.fit)
+
+# add in interaction term between bhead and blength
+mult.fit = lm(bwt ~ babysex + bhead + blength + fincome + gaweeks + malform+ menarche + momage+ mrace + wtgain + bhead*blength, data = bwt)
+summary(mult.fit) 
+
+# retain variables that have p-value smaller than 0.05
+# i.e. fincome, malform, menarche, momage, parity
+mult.fit = lm(bwt ~ babysex + bhead + blength  + gaweeks + mrace + wtgain + bhead*blength, data = bwt)
+summary(mult.fit)
+
+```
+
+Then the final model we obtain is `bwt ~ babysex + bhead + blength  + gaweeks + mrace + wtgain + bhead*blength` with an overall R-squared of 0.71 and the p-value of overall F test being significantly less than 0.05. 
+
+```{r plotting residuals against fitted values }
+bwt %>% 
+  add_predictions(mult.fit) %>% 
+  add_residuals(mult.fit) %>% 
+  ggplot(aes(x = pred, y = resid))+
+  geom_point()
+```
+
+
+```{r comparison between models}
+fit1 = lm(bwt ~ blength + gaweeks, data = bwt)
+fit2 = lm(bwt ~ bhead+ blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*babysex, data = bwt)
+
+```
+
+
+```{r cv of three models}
+#generate a cross validation dataframe
+set.seed(1)
+cv_df = crossv_mc(bwt, 10) 
+
+#convert cv_df to a tibble
+cv_df =
+  cv_df %>% 
+  mutate(train = map(train, as_tibble),
+         test = map(test, as_tibble))
+
+# fits each of the candidate models to cv datasets
+cv_df = 
+  cv_df %>% 
+  mutate(our_mod  = map(train, ~lm(bwt ~ babysex + bhead + blength  + gaweeks + mrace + wtgain + bhead*blength, data = .x)),
+         fit1_mod = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+         fit2_mod = map(train, ~lm(bwt ~ bhead+ blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*babysex, data = .x))) %>% 
+  mutate(rmse_our    = map2_dbl(our_mod, test, ~rmse(model = .x, data = .y)),
+         rmse_fit1 = map2_dbl(fit1_mod, test, ~rmse(model = .x, data = .y)),
+         rmse_fit2 = map2_dbl(fit2_mod, test, ~rmse(model = .x, data = .y)))
+
+# plot the prediction error distribution for each candidate model
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  gather(key = model, value = rmse) %>% 
+  mutate(model = str_replace(model, "rmse_", ""),
+         model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+```
+
+- `our`: The model we built previously, `bwt ~ babysex + bhead + blength  + gaweeks + mrace + wtgain + bhead*blength`
+- `fit1`: `bwt ~ blength + gaweeks`
+- `fit2`: `bwt ~ bhead+ blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*babysex`
+
+As seen from the RMSE distributions of the three candidate models, the model we proposed previously has clearly demonstrated more predictive accuracy over the other two fits. `Fit1` that only uses the two main predictors, though the simplest, does poorly in terms of describing what factors can affect baby's birthweight based on this dataset.
